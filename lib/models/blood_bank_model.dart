@@ -4,6 +4,8 @@ class BloodBankModel {
   final String state;
   final String logoInitials;
   final Map<String, int> inventory;
+  final double lat;
+  final double lng;
 
   const BloodBankModel({
     required this.name,
@@ -11,6 +13,8 @@ class BloodBankModel {
     required this.state,
     required this.logoInitials,
     required this.inventory,
+    this.lat = 18.5204, // default: Pune city centre
+    this.lng = 73.8567,
   });
 }
 

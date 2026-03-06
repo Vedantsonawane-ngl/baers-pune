@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/blood_bank_model.dart';
 import 'sos_request_details_screen.dart';
+import 'ambulance_tracking_screen.dart';
 
 class BloodBankDashboardScreen extends StatefulWidget {
   final BloodBankModel bank;
@@ -164,36 +165,52 @@ class _BloodBankDashboardScreenState extends State<BloodBankDashboardScreen> {
 
   // ── Open SOS request details screen ─────────────────────────────────────
   void _openSosDetails(BloodBankSosRequest req) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SosRequestDetailsScreen(
-          req: req,
-          onAccept: () {
-            setState(() {
-              req.isResponded = true;
-              final cur = _inventory[req.bloodGroup] ?? 0;
-              _inventory[req.bloodGroup] = (cur - req.unitsNeeded).clamp(
-                0,
-                9999,
-              );
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Dispatched ${req.unitsNeeded} units of ${req.bloodGroup} to ${req.hospitalName}',
-                ),
-                backgroundColor: const Color(0xFF2E7D32),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => SosRequestDetailsScreen(
+              req: req,
+              onAccept: () {
+                setState(() {
+                  req.isResponded = true;
+                  final cur = _inventory[req.bloodGroup] ?? 0;
+                  _inventory[req.bloodGroup] = (cur - req.unitsNeeded).clamp(
+                    0,
+                    9999,
+                  );
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Dispatched ${req.unitsNeeded} units of ${req.bloodGroup} to ${req.hospitalName}',
+                    ),
+                    backgroundColor: const Color(0xFF2E7D32),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                );
+              },
+              onDecline: () => setState(() => req.isRejected = true),
+            ),
+          ),
+        )
+        .then((_) {
+          // After the details screen pops, open the ambulance tracker if accepted
+          if (req.isResponded && mounted) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AmbulanceTrackingScreen(
+                  req: req,
+                  bankLat: widget.bank.lat,
+                  bankLng: widget.bank.lng,
+                  bankName: widget.bank.name,
                 ),
               ),
             );
-          },
-          onDecline: () => setState(() => req.isRejected = true),
-        ),
-      ),
-    );
+          }
+        });
   }
 
   void _rejectSos(BloodBankSosRequest req) =>

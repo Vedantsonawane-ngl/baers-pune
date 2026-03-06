@@ -114,6 +114,15 @@ class _BloodBankLoginScreenState extends State<BloodBankLoginScreen> {
 
   void _proceed() {
     if (_formKey.currentState!.validate()) {
+      // Real-ish Pune locations for each blood bank (for ambulance animation)
+      const coords = <String, List<double>>{
+        'Pune City Blood Bank': [18.5204, 73.8567],
+        'Sahyadri Blood Center': [18.5236, 73.8437],
+        'Ratna Blood Bank': [18.5318, 73.8489],
+        'Jeevandhara Blood Bank': [18.5103, 73.8275],
+        'Rakt Seva Blood Bank': [18.5447, 73.8765],
+      };
+      final pos = coords[_selected] ?? [18.5204, 73.8567];
       final bank = BloodBankModel(
         name: _selected,
         city: 'Pune',
@@ -122,6 +131,8 @@ class _BloodBankLoginScreenState extends State<BloodBankLoginScreen> {
         inventory: Map<String, int>.from(
           _inventories[_selected] ?? _inventories['Pune City Blood Bank']!,
         ),
+        lat: pos[0],
+        lng: pos[1],
       );
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => BloodBankDashboardScreen(bank: bank)),

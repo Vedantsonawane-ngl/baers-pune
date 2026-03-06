@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/donor_model.dart';
+import '../models/blood_request_api_model.dart';
+import '../services/api_service.dart';
+import '../services/requests_store.dart';
 import '../widgets/blood_group_card.dart';
 import '../widgets/blood_request_card.dart';
 import '../widgets/donation_camp_card.dart';
@@ -524,28 +527,33 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentTab,
-        children: [
-          _HomeTab(
-            donor: widget.donor,
-            requests: _requests,
-            camps: _camps,
-            onRespond: _onRespond,
-            onViewCamp: _onViewCampDetails,
-          ),
-          _PlaceholderTab(
-            icon: Icons.water_drop_outlined,
-            label: 'Blood Requests',
-            subtitle: 'All nearby blood requests will appear here.',
-          ),
-          _PlaceholderTab(
-            icon: Icons.history_rounded,
-            label: 'Donation History',
-            subtitle: 'Your past donations will be tracked here.',
-          ),
-          _ProfileTab(donor: widget.donor),
-        ],
+      body: ValueListenableBuilder<List<BloodRequestApiModel>>(
+        valueListenable: RequestsStore.instance.requests,
+        builder: (context, liveRequests, child) {
+          // Convert top 5 live requests for the Home tab; fall back to static if empty
+          final homeRequests = liveRequests.isNotEmpty
+              ? liveRequests.take(5).map((r) => r.toDonorCard()).toList()
+              : _requests;
+          return IndexedStack(
+            index: _currentTab,
+            children: [
+              _HomeTab(
+                donor: widget.donor,
+                requests: homeRequests,
+                camps: _camps,
+                onRespond: _onRespond,
+                onViewCamp: _onViewCampDetails,
+              ),
+              _LiveRequestsTab(donor: widget.donor),
+              _PlaceholderTab(
+                icon: Icons.history_rounded,
+                label: 'Donation History',
+                subtitle: 'Your past donations will be tracked here.',
+              ),
+              _ProfileTab(donor: widget.donor),
+            ],
+          );
+        },
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -1082,6 +1090,308 @@ class _ProfileTab extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Live Blood Requests tab ──────────────────────────────────────────────────
+// Shows all active requests from the backend with blood-group filter chips.
+class _LiveRequestsTab extends StatefulWidget {
+  final DonorModel donor;
+  const _LiveRequestsTab({required this.donor});
+
+  @override
+  State<_LiveRequestsTab> createState() => _LiveRequestsTabState();
+}
+
+class _LiveRequestsTabState extends State<_LiveRequestsTab> {
+  static const _red = Color(0xFFD32F2F);
+  static const _bloodGroups = [
+    'All',
+    'A+',
+    'A\u2212',
+    'B+',
+    'B\u2212',
+    'AB+',
+    'AB\u2212',
+    'O+',
+    'O\u2212',
+  ];
+  String _selectedGroup = 'All';
+
+  List<BloodRequestApiModel> _filtered(List<BloodRequestApiModel> all) {
+    if (_selectedGroup == 'All') return all;
+    final sel = _selectedGroup.replaceAll('\u2212', '-');
+    return all
+        .where((r) => r.bloodGroup.replaceAll('\u2212', '-') == sel)
+        .toList();
+  }
+
+  Future<void> _respondTo(BloodRequestApiModel req) async {
+    Navigator.pop(context);
+    try {
+      await ApiService.respondToRequest(req.id);
+      await RequestsStore.instance.refresh();
+    } catch (_) {
+      // best-effort
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text('Response sent to ${req.hospitalName}!'),
+          ],
+        ),
+        backgroundColor: _red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _showRespondDialog(BloodRequestApiModel req) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      backgroundColor: Colors.white,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFDDDDDD),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Container(
+              width: 60,
+              height: 60,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFDE8E8),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.volunteer_activism,
+                color: _red,
+                size: 30,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Respond to ${req.hospitalName}?',
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1A1A1A),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${req.bloodGroup} needed \u00b7 ${req.unitsRequired} unit(s) \u00b7 ${req.neededIn}.\n'
+              'Your contact will be shared with the hospital.',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF888888),
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFFDDDDDD)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: Color(0xFF666666),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => _respondTo(req),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _red,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text(
+                      'Confirm',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // ── Filter chips ──────────────────────────────────────────────
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _bloodGroups.map((g) {
+                final selected = _selectedGroup == g;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedGroup = g),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFFFDE8E8)
+                          : const Color(0xFFF2F2F2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: selected ? _red : Colors.transparent,
+                        width: 1.4,
+                      ),
+                    ),
+                    child: Text(
+                      g,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: selected ? _red : const Color(0xFF666666),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+
+        // ── Live list ─────────────────────────────────────────────────
+        Expanded(
+          child: ValueListenableBuilder<List<BloodRequestApiModel>>(
+            valueListenable: RequestsStore.instance.requests,
+            builder: (context, allRequests, child) {
+              final filtered = _filtered(allRequests);
+
+              return ValueListenableBuilder<bool>(
+                valueListenable: RequestsStore.instance.loading,
+                builder: (context, isLoading, child) {
+                  if (isLoading && allRequests.isEmpty) {
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        color: _red,
+                        strokeWidth: 2,
+                      ),
+                    );
+                  }
+
+                  if (filtered.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(36),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFFDE8E8),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.water_drop_outlined,
+                                size: 32,
+                                color: _red,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _selectedGroup == 'All'
+                                  ? 'No active requests right now'
+                                  : 'No $_selectedGroup requests right now',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1A1A1A),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Pull to refresh or check back soon.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF888888),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    color: _red,
+                    onRefresh: RequestsStore.instance.refresh,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final req = filtered[index];
+                        return BloodRequestCard(
+                          request: req.toDonorCard(),
+                          onRespond: () => _showRespondDialog(req),
+                        );
+                      },
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

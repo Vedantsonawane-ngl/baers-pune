@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../models/hospital_model.dart';
+import '../services/api_service.dart';
+import '../services/requests_store.dart';
 import 'emergency_map_screen.dart';
 
 class HospitalDashboardScreen extends StatefulWidget {
@@ -518,7 +520,7 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () {
+                    onPressed: () async {
                       if (selectedGroup == null ||
                           reasonCtrl.text.trim().isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -529,41 +531,113 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
                         );
                         return;
                       }
-                      final newReq = HospitalBloodRequest(
-                        id: 'req_${DateTime.now().millisecondsSinceEpoch}',
-                        bloodGroup: selectedGroup!,
-                        reason: reasonCtrl.text.trim(),
-                        neededIn: 'Needed ASAP',
-                        unitsRequired: units,
-                        donorsResponding: 0,
-                        progressPercent: 0,
-                        urgency: urgency,
-                      );
-                      setState(() => _requests.insert(0, newReq));
+                      final urgencyStr =
+                          urgency == HospitalRequestUrgency.emergency
+                          ? 'emergency'
+                          : urgency == HospitalRequestUrgency.high
+                          ? 'high'
+                          : 'normal';
+                      // Capture messenger before the async gap
+                      final messenger = ScaffoldMessenger.of(context);
+
+                      // Close sheet immediately for snappy UX
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Row(
-                            children: [
-                              const Icon(
-                                Icons.check_circle,
-                                color: Colors.white,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Emergency request for $selectedGroup sent!',
-                              ),
-                            ],
+
+                      try {
+                        final created = await ApiService.createRequest(
+                          bloodGroup: selectedGroup!,
+                          reason: reasonCtrl.text.trim(),
+                          urgency: urgencyStr,
+                          unitsRequired: units,
+                          hospitalName: widget.hospital.name,
+                          hospitalCity: widget.hospital.city,
+                        );
+                        // Optimistic insert so it appears instantly
+                        RequestsStore.instance.addOptimistic(created);
+                        // Also add to local list for the hospital view
+                        setState(
+                          () => _requests.insert(
+                            0,
+                            HospitalBloodRequest(
+                              id: 'req_${created.id}',
+                              bloodGroup: created.bloodGroup,
+                              reason: created.reason,
+                              neededIn: created.neededIn,
+                              unitsRequired: created.unitsRequired,
+                              donorsResponding: 0,
+                              progressPercent: 0,
+                              urgency: urgency,
+                            ),
                           ),
-                          backgroundColor: _red,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                        );
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Emergency request for ${created.bloodGroup} sent!',
+                                  ),
+                                ],
+                              ),
+                              backgroundColor: _red,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              margin: const EdgeInsets.all(16),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        // Fallback: add locally so the demo still works offline
+                        setState(
+                          () => _requests.insert(
+                            0,
+                            HospitalBloodRequest(
+                              id: 'req_${DateTime.now().millisecondsSinceEpoch}',
+                              bloodGroup: selectedGroup!,
+                              reason: reasonCtrl.text.trim(),
+                              neededIn: 'Needed ASAP',
+                              unitsRequired: units,
+                              donorsResponding: 0,
+                              progressPercent: 0,
+                              urgency: urgency,
+                            ),
                           ),
-                          margin: const EdgeInsets.all(16),
-                        ),
-                      );
+                        );
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Request for $selectedGroup added (offline mode).',
+                                  ),
+                                ],
+                              ),
+                              backgroundColor: Colors.orange[700],
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              margin: const EdgeInsets.all(16),
+                            ),
+                          );
+                        }
+                      }
                     },
                     icon: const Icon(
                       Icons.add_circle_outline,
@@ -792,6 +866,7 @@ class _HospitalDashboardScreenState extends State<HospitalDashboardScreen> {
   void initState() {
     super.initState();
     _fetchPredictions();
+    RequestsStore.instance.startPolling();
   }
 
   Future<void> _fetchPredictions() async {
